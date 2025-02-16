@@ -1,80 +1,111 @@
 import streamlit as st
-import pandas as pd
 import requests
+import pandas as pd
 import plotly.express as px
-import matplotlib.pyplot as plt
-import seaborn as sns
 
-# ------------------ Streamlit UI ------------------ #
-st.set_page_config(page_title="COVID-19 Dashboard", layout="wide")
+# 🔹 Streamlit App Config
+st.set_page_config(
+    page_title="COVID-19 Dashboard",
+    page_icon="🦠",
+    layout="wide"
+)
 
-st.title("🦠 COVID-19 Global Dashboard")
-st.write("Real-time COVID-19 statistics and visualizations.")
-
-# ------------------ Fetch COVID-19 Data ------------------ #
+# 🔹 Function to Fetch Data
 @st.cache_data
-def get_covid_data():
-    url = "https://disease.sh/v3/covid-19/countries"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return pd.DataFrame(response.json())
-    else:
-        st.error("Failed to fetch data. Please try again later.")
+def fetch_data(url):
+    """Fetch JSON data from API and handle errors."""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching data: {e}")
         return None
 
-data = get_covid_data()
+# 🔹 Load Data
+GLOBAL_API = "https://disease.sh/v3/covid-19/all"
+COUNTRIES_API = "https://disease.sh/v3/covid-19/countries"
 
-# ------------------ Sidebar for Country Selection ------------------ #
-st.sidebar.title("🌍 Select Country")
-countries = ["Global"] + sorted(data["country"].unique().tolist())
-selected_country = st.sidebar.selectbox("Choose a country:", countries)
+global_data = fetch_data(GLOBAL_API)
+country_data = fetch_data(COUNTRIES_API)
 
-# ------------------ Display COVID-19 Statistics ------------------ #
-if selected_country == "Global":
-    url_global = "https://disease.sh/v3/covid-19/all"
-    global_data = requests.get(url_global).json()
+# 🔹 Sidebar Navigation
+st.sidebar.title("🔍 Navigation")
+page = st.sidebar.radio("Go to", ["🌍 Global Overview", "📌 Country-wise Data", "📊 Data Table"])
 
-    st.markdown("### 🌎 Global COVID-19 Statistics")
-    col1, col2, col3 = st.columns(3)
+# 🔹 Page: Global Overview
+if page == "🌍 Global Overview":
+    st.title("🌍 COVID-19 Global Overview")
     
-    col1.metric("🦠 Total Cases", f"{global_data['cases']:,}")
-    col2.metric("☠️ Total Deaths", f"{global_data['deaths']:,}")
-    col3.metric("✅ Total Recovered", f"{global_data['recovered']:,}")
-    
-else:
-    country_data = data[data["country"] == selected_country].iloc[0]
+    if global_data:
+        col1, col2, col3 = st.columns(3)
 
-    st.markdown(f"### {country_data['country']} COVID-19 Statistics")
-    col1, col2, col3 = st.columns(3)
-    
-    col1.metric("🦠 Total Cases", f"{country_data['cases']:,}")
-    col2.metric("☠️ Total Deaths", f"{country_data['deaths']:,}")
-    col3.metric("✅ Total Recovered", f"{country_data['recovered']:,}")
+        col1.metric("🦠 Total Cases", f"{global_data['cases']:,}")
+        col2.metric("☠️ Total Deaths", f"{global_data['deaths']:,}")
+        col3.metric("💪 Total Recovered", f"{global_data['recovered']:,}")
 
-# ------------------ Data Visualization ------------------ #
-st.markdown("## 📊 COVID-19 Data Visualization")
+        # Pie Chart for Global Cases Distribution
+        fig1 = px.pie(
+            values=[global_data["cases"], global_data["deaths"], global_data["recovered"]],
+            names=["Cases", "Deaths", "Recovered"],
+            title="Global COVID-19 Cases Distribution",
+            color_discrete_sequence=["blue", "red", "green"]
+        )
+        st.plotly_chart(fig1, use_container_width=True)
 
-# 🔹 Bar Chart: Cases, Deaths, Recoveries
-fig1 = px.bar(data, x="country", y=["cases", "deaths", "recovered"], title="COVID-19 Cases by Country",
-              labels={"value": "Count", "variable": "Category"}, barmode="group")
-st.plotly_chart(fig1, use_container_width=True)
+    else:
+        st.warning("⚠️ Global COVID-19 data is unavailable.")
 
-# 🔹 Pie Chart: Cases Distribution
-st.markdown("### 🏥 COVID-19 Cases Distribution")
-fig2 = px.pie(values=[global_data["cases"], global_data["deaths"], global_data["recovered"]],
-              names=["Cases", "Deaths", "Recovered"],
-              title="Global COVID-19 Cases Distribution",
-              color_discrete_sequence=["blue", "red", "green"])
-st.plotly_chart(fig2, use_container_width=True)
+# 🔹 Page: Country-wise Data
+elif page == "📌 Country-wise Data":
+    st.title("📌 COVID-19 Country-wise Statistics")
 
-# 🔹 Top 10 Most Affected Countries
-top_10 = data.nlargest(10, "cases")[["country", "cases", "deaths", "recovered"]]
+    if country_data:
+        df = pd.DataFrame(country_data)[["country", "cases", "deaths", "recovered"]]
+        df = df.sort_values(by="cases", ascending=False)
 
-fig3, ax = plt.subplots(figsize=(10, 5))
-sns.barplot(y=top_10["country"], x=top_10["cases"], palette="Blues_r", ax=ax)
-ax.set_title("Top 10 Most Affected Countries")
-st.pyplot(fig3)
+        # Dropdown to Select Country
+        country_list = df["country"].tolist()
+        selected_country = st.sidebar.selectbox("Select a country", country_list)
 
-st.sidebar.info("📢 Data Source: [Disease.sh API](https://disease.sh)")
+        # Filter Selected Country Data
+        country_stats = df[df["country"] == selected_country].iloc[0]
 
-st.success("✅ Dashboard Updated! Choose a different country from the sidebar.")
+        # Display Selected Country Data
+        st.subheader(f"📍 {selected_country}")
+        st.metric("🦠 Cases", f"{country_stats['cases']:,}")
+        st.metric("☠️ Deaths", f"{country_stats['deaths']:,}")
+        st.metric("💪 Recovered", f"{country_stats['recovered']:,}")
+
+        # Bar Chart of Top 10 Most Affected Countries
+        st.subheader("🌎 Top 10 Most Affected Countries")
+        top10 = df.head(10)
+        fig2 = px.bar(
+            top10, x="country", y="cases",
+            title="Top 10 Countries by COVID-19 Cases",
+            color="cases",
+            labels={"cases": "Total Cases", "country": "Country"},
+            color_continuous_scale="reds"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    else:
+        st.warning("⚠️ Country-wise COVID-19 data is unavailable.")
+
+# 🔹 Page: Data Table
+elif page == "📊 Data Table":
+    st.title("📊 COVID-19 Data Table")
+
+    if country_data:
+        df = pd.DataFrame(country_data)[["country", "cases", "deaths", "recovered"]]
+        df = df.sort_values(by="cases", ascending=False)
+
+        # Display Data Table
+        st.dataframe(df, height=600)
+
+    else:
+        st.warning("⚠️ Data is not available.")
+
+# 🔹 Footer
+st.sidebar.markdown("---")
+st.sidebar.info("Developed by Tanvi Kakade | Data Source: disease.sh API")
